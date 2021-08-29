@@ -30,7 +30,7 @@ watchexec = "=1.14.1"
 [dependencies.handlebars_misc_helpers]
 version = "0.12.*"
 default-features = false
-features = ["string", "json"]
+features = ["string", "json", "http_attohttpc"]
 
 [dev-dependencies]
 mockall = "0.9.*"
