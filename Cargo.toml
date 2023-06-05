@@ -1,6 +1,6 @@
 [package]
 name = "dotter"
-version = "0.12.6"
+version = "0.13.0"
 authors = ["SuperCuber <amit.gold01@gmail.com>"]
 description = "A dotfile manager and templater written in rust"
 edition = "2018"
@@ -12,8 +12,9 @@ license = "Unlicense"
 
 [dependencies]
 anyhow = "1.*"
-clap = "2.*"
-crossterm = "0.18.*"
+clap = { version = "4.0.26", features = ["derive"] }
+clap_complete = "4.0.5"
+crossterm = "0.25.0"
 diff = "0.1.*"
 handlebars = { version = "4.*", features = ["script_helper"] }
 hostname = "0.3.*"
@@ -21,11 +22,11 @@ log = "0.4.*"
 maplit = "1.*"
 meval = "0.2.*"
 serde = "1.*"
-shellexpand = "1.*"
-simplelog = "0.8.*"
-structopt = "0.3.*"
+shellexpand = "2.*"
+simplelog = "0.12.*"
+tokio = "1.*"
 toml = "0.4.*"
-watchexec = "=1.14.1"
+watchexec = "=2.0.0-pre.14"
 
 [dependencies.handlebars_misc_helpers]
 version = "0.12.*"
@@ -33,7 +34,7 @@ default-features = false
 features = ["string", "json", "http_attohttpc"]
 
 [dev-dependencies]
-mockall = "0.9.*"
+mockall = "0.11.3"
 # Enable this instead for better failure messages (on nightly only)
 # mockall = { version = "0.9.*", features = ["nightly"] }
 
@@ -41,4 +42,4 @@ mockall = "0.9.*"
 dunce = "1.*"
 
 [target.'cfg(unix)'.dependencies]
-libc = "0.2.94"
+libc = "0.2.137"

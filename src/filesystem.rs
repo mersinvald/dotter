@@ -36,7 +36,7 @@ where
     T: Serialize,
 {
     let data = toml::to_string(&data).context("serialize data")?;
-    fs::write(filename, &data).context("write to file")
+    fs::write(filename, data).context("write to file")
 }
 
 // === Mockable filesystem ===
@@ -48,9 +48,6 @@ pub trait Filesystem {
 
     /// Check state of expected symbolic link on disk
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison>;
-
-    /// Check source file for whether it should be a symlink or a template
-    fn is_template(&mut self, source: &Path) -> Result<bool>;
 
     /// Removes a file or folder, elevating privileges if needed
     fn remove_file(&mut self, path: &Path) -> Result<()>;
@@ -92,13 +89,13 @@ pub trait Filesystem {
 
 #[cfg(windows)]
 pub struct RealFilesystem {
-    interactive: bool,
+    noconfirm: bool,
 }
 
 #[cfg(windows)]
 impl RealFilesystem {
-    pub fn new(interactive: bool) -> RealFilesystem {
-        RealFilesystem { interactive }
+    pub fn new(noconfirm: bool) -> RealFilesystem {
+        RealFilesystem { noconfirm }
     }
 }
 
@@ -110,8 +107,7 @@ impl Filesystem for RealFilesystem {
         let link_state = get_file_state(link).context("get link state")?;
         trace!("Link state: {:#?}", link_state);
 
-        let source = real_path(source).context("get real path of source")?;
-        Ok(compare_symlink(&source, source_state, link_state))
+        compare_symlink(source, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -123,12 +119,8 @@ impl Filesystem for RealFilesystem {
         Ok(compare_template(target_state, cache_state))
     }
 
-    fn is_template(&mut self, source: &Path) -> Result<bool> {
-        is_template(source)
-    }
-
     fn remove_file(&mut self, path: &Path) -> Result<()> {
-        let metadata = path.metadata().context("get metadata")?;
+        let metadata = path.symlink_metadata().context("get metadata")?;
         if metadata.is_dir() {
             std::fs::remove_dir_all(path).context("remove directory")
         } else {
@@ -153,7 +145,7 @@ impl Filesystem for RealFilesystem {
                 .next()
                 .is_none()
         {
-            if (!self.interactive || no_ask)
+            if (self.noconfirm || no_ask)
                 || ask_boolean(&format!(
                     "Directory at {:?} is now empty. Delete [y/N]? ",
                     path
@@ -175,10 +167,12 @@ impl Filesystem for RealFilesystem {
                 owner, link, target
             );
         }
-        fs::symlink_file(
-            real_path(target).context("get real path of source file")?,
-            link,
-        )
+        let real_source_path = real_path(target).context("get real path of source file")?;
+        if real_source_path.is_dir() {
+            fs::symlink_dir(real_source_path, link)
+        } else {
+            fs::symlink_file(real_source_path, link)
+        }
         .context("create symlink")
     }
 
@@ -237,16 +231,16 @@ impl Filesystem for RealFilesystem {
 
 #[cfg(unix)]
 pub struct RealFilesystem {
-    interactive: bool,
+    noconfirm: bool,
     sudo_occurred: bool,
 }
 
 #[cfg(unix)]
 impl RealFilesystem {
-    pub fn new(interactive: bool) -> RealFilesystem {
+    pub fn new(noconfirm: bool) -> RealFilesystem {
         RealFilesystem {
             sudo_occurred: false,
-            interactive,
+            noconfirm,
         }
     }
 
@@ -277,8 +271,7 @@ impl Filesystem for RealFilesystem {
         let source_state = get_file_state(source).context("get source state")?;
         let link_state = get_file_state(link).context("get link state")?;
 
-        let source = real_path(source).context("get real path of source")?;
-        Ok(compare_symlink(&source, source_state, link_state))
+        compare_symlink(source, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -288,12 +281,8 @@ impl Filesystem for RealFilesystem {
         Ok(compare_template(target_state, cache_state))
     }
 
-    fn is_template(&mut self, source: &Path) -> Result<bool> {
-        is_template(source)
-    }
-
     fn remove_file(&mut self, path: &Path) -> Result<()> {
-        let metadata = path.metadata().context("get metadata")?;
+        let metadata = path.symlink_metadata().context("get metadata")?;
         let result = if metadata.is_dir() {
             std::fs::remove_dir_all(path)
         } else {
@@ -337,7 +326,7 @@ impl Filesystem for RealFilesystem {
                 .next()
                 .is_none()
         {
-            if (!self.interactive || no_ask)
+            if (self.noconfirm || no_ask)
                 || ask_boolean(&format!(
                     "Directory at {:?} is now empty. Delete [y/N]? ",
                     path
@@ -589,8 +578,7 @@ impl Filesystem for DryRunFilesystem {
             state
         };
 
-        let source = real_path(source).context("get real path of source")?;
-        Ok(compare_symlink(&source, source_state, link_state))
+        compare_symlink(source, source_state, link_state)
     }
 
     fn compare_template(&mut self, target: &Path, cache: &Path) -> Result<TemplateComparison> {
@@ -612,11 +600,6 @@ impl Filesystem for DryRunFilesystem {
         };
 
         Ok(compare_template(target_state, cache_state))
-    }
-
-    fn is_template(&mut self, source: &Path) -> Result<bool> {
-        // This is fine because source files are never edited
-        is_template(source)
     }
 
     fn remove_file(&mut self, path: &Path) -> Result<()> {
@@ -715,7 +698,7 @@ impl Filesystem for DryRunFilesystem {
 // === Comparisons ===
 
 fn get_file_state(path: &Path) -> Result<FileState> {
-    if let Ok(target) = fs::read_link(&path) {
+    if let Ok(target) = fs::read_link(path) {
         return Ok(FileState::SymbolicLink(target));
     }
 
@@ -731,7 +714,7 @@ fn get_file_state(path: &Path) -> Result<FileState> {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum SymlinkComparison {
     Identical,
     OnlySourceExists,
@@ -760,11 +743,11 @@ fn compare_symlink(
     source_path: &Path,
     source_state: FileState,
     link_state: FileState,
-) -> SymlinkComparison {
-    match (source_state, link_state) {
+) -> Result<SymlinkComparison> {
+    Ok(match (source_state, link_state) {
         (FileState::Missing, FileState::SymbolicLink(_)) => SymlinkComparison::OnlyTargetExists,
         (_, FileState::SymbolicLink(t)) => {
-            if t == source_path {
+            if t == real_path(source_path).context("get real path of source")? {
                 SymlinkComparison::Identical
             } else {
                 SymlinkComparison::Changed
@@ -773,10 +756,10 @@ fn compare_symlink(
         (FileState::Missing, FileState::Missing) => SymlinkComparison::BothMissing,
         (_, FileState::Missing) => SymlinkComparison::OnlySourceExists,
         _ => SymlinkComparison::TargetNotSymlink,
-    }
+    })
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum TemplateComparison {
     Identical,
     OnlyCacheExists,
@@ -820,7 +803,7 @@ fn compare_template(target_state: FileState, cache_state: FileState) -> Template
 /// === Utility functions ===
 
 pub fn real_path(path: &Path) -> Result<PathBuf, io::Error> {
-    let path = std::fs::canonicalize(&path)?;
+    let path = std::fs::canonicalize(path)?;
     Ok(platform_dunce(&path))
 }
 
@@ -841,9 +824,14 @@ pub fn ask_boolean(prompt: &str) -> bool {
     buf.to_lowercase().starts_with('y')
 }
 
-fn is_template(source: &Path) -> Result<bool> {
+pub fn is_template(source: &Path) -> Result<bool> {
+    if fs::metadata(source)?.is_dir() {
+        return Ok(false);
+    }
+
     let mut file = File::open(source).context("open file")?;
     let mut buf = String::new();
+
     if file.read_to_string(&mut buf).is_err() {
         warn!("File {:?} is not valid UTF-8 - detecting as symlink. Explicitly specify it to silence this message.", source);
         Ok(false)
@@ -859,10 +847,10 @@ pub fn symlinks_enabled(test_file_path: &Path) -> Result<bool> {
         "Testing whether symlinks are enabled on path {:?}",
         test_file_path
     );
-    let _ = std::fs::remove_file(&test_file_path);
-    match fs::symlink_file("test.txt", &test_file_path) {
+    let _ = std::fs::remove_file(test_file_path);
+    match fs::symlink_file("test.txt", test_file_path) {
         Ok(()) => {
-            std::fs::remove_file(&test_file_path)
+            std::fs::remove_file(test_file_path)
                 .context(format!("remove test file {:?}", test_file_path))?;
             Ok(true)
         }

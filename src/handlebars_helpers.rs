@@ -9,7 +9,7 @@ use std::process::{Command, Stdio};
 
 use crate::config::{Configuration, Files, Helpers, Variables};
 
-pub fn create_new_handlebars<'a, 'b>(config: &'a mut Configuration) -> Result<Handlebars<'b>> {
+pub fn create_new_handlebars<'b>(config: &mut Configuration) -> Result<Handlebars<'b>> {
     debug!("Creating Handlebars instance...");
     let mut handlebars = Handlebars::new();
     handlebars.register_escape_fn(|s| s.to_string()); // Disable html-escaping
@@ -269,7 +269,7 @@ fn register_rust_helpers(handlebars: &mut Handlebars<'_>) {
 fn register_script_helpers(handlebars: &mut Handlebars<'_>, helpers: &Helpers) {
     debug!("Registering script helpers...");
     for (helper_name, helper_path) in helpers {
-        if let Err(e) = handlebars.register_script_helper_file(helper_name, &helper_path) {
+        if let Err(e) = handlebars.register_script_helper_file(helper_name, helper_path) {
             warn!(
                 "Coudln't register helper script {} at path {:?} because {}",
                 helper_name, helper_path, e
@@ -308,6 +308,15 @@ fn add_dotter_variable(variables: &mut Variables, files: &Files, packages: &[Str
         "os".into(),
         (if cfg!(windows) { "windows" } else { "unix" }).into(),
     );
+    dotter.insert(
+        "current_dir".into(),
+        Value::String(
+            std::env::current_dir()
+                .expect("get current dir")
+                .to_string_lossy()
+                .into(),
+        ),
+    );
 
     variables.insert("dotter".into(), dotter.into());
 }
@@ -323,6 +332,7 @@ mod test {
             variables: maplit::btreemap! { "foo".into() => 2.into() },
             helpers: Helpers::new(),
             packages: vec!["default".into()],
+            recurse: true,
         };
         let handlebars = create_new_handlebars(&mut config).unwrap();
 
@@ -351,6 +361,7 @@ mod test {
             variables: Variables::new(),
             helpers: Helpers::new(),
             packages: vec!["default".into()],
+            recurse: true,
         };
         let handlebars = create_new_handlebars(&mut config).unwrap();
 

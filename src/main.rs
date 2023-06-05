@@ -12,7 +12,12 @@ mod hooks;
 mod init;
 mod watch;
 
+use std::fmt::Write;
+use std::io;
+
 use anyhow::{Context, Result};
+use clap::CommandFactory;
+use clap_complete::{generate, generate_to};
 
 fn main() {
     match run() {
@@ -30,7 +35,7 @@ pub(crate) fn display_error(error: anyhow::Error) {
     let mut error_message = format!("Failed to {}\nCaused by:\n", chain.next().unwrap());
 
     for e in chain {
-        error_message.push_str(&format!("    {}\n", e));
+        writeln!(error_message, "    {}", e).unwrap();
     }
     // Remove last \n
     error_message.pop();
@@ -66,6 +71,7 @@ fn run() -> Result<bool> {
             .add_filter_allow("dotter".into())
             .build(),
         simplelog::TerminalMode::Mixed,
+        simplelog::ColorChoice::Auto,
     )
     .unwrap();
 
@@ -77,7 +83,7 @@ If you're truly logged in as root, it is safe to ignore this message.
 Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, then use Dotter as a regular user.");
     }
 
-    match opt.action.unwrap_or_default() {
+    match opt.action.clone().unwrap_or_default() {
         args::Action::Deploy => {
             debug!("Deploying...");
             if deploy::deploy(&opt).context("deploy")? {
@@ -98,7 +104,23 @@ Otherwise, run `dotter undeploy` as root, remove cache.toml and cache/ folders, 
         }
         args::Action::Watch => {
             debug!("Watching...");
-            watch::watch(opt).context("watch repository")?;
+            tokio::runtime::Runtime::new()
+                .expect("create a tokio runtime")
+                .block_on(watch::watch(opt))
+                .context("watch repository")?;
+        }
+        args::Action::GenCompletions { shell, to } => {
+            if let Some(to) = to {
+                generate_to(shell, &mut args::Options::command(), "dotter", to)
+                    .context("write completion to a file")?;
+            } else {
+                generate(
+                    shell,
+                    &mut args::Options::command(),
+                    "dotter",
+                    &mut io::stdout(),
+                );
+            }
         }
     }
 

@@ -42,7 +42,7 @@ pub fn deploy(opt: &Options) -> Result<bool> {
     let handlebars = create_new_handlebars(&mut config).context("initialize handlebars")?;
 
     debug!("Running pre-deploy hook");
-    if opt.act {
+    if !opt.dry_run {
         hooks::run_hook(
             &opt.pre_deploy,
             &opt.cache_directory,
@@ -53,8 +53,8 @@ pub fn deploy(opt: &Options) -> Result<bool> {
     }
 
     let (mut real_fs, mut dry_run_fs);
-    let fs: &mut dyn Filesystem = if opt.act {
-        real_fs = crate::filesystem::RealFilesystem::new(opt.interactive);
+    let fs: &mut dyn Filesystem = if !opt.dry_run {
+        real_fs = crate::filesystem::RealFilesystem::new(opt.noconfirm);
         &mut real_fs
     } else {
         dry_run_fs = crate::filesystem::DryRunFilesystem::new();
@@ -84,8 +84,7 @@ Proceeding by copying instead of symlinking."
         if symlinks_enabled {
             match target {
                 FileTarget::Automatic(target) => {
-                    if fs
-                        .is_template(&source)
+                    if filesystem::is_template(&source)
                         .context(format!("check whether {:?} is a template", source))?
                     {
                         desired_templates.insert(source, target.into());
@@ -140,12 +139,12 @@ Proceeding by copying instead of symlinking."
         error_occurred = true;
     }
 
-    if opt.act {
+    if !opt.dry_run {
         filesystem::save_file(&opt.cache_file, cache).context("save cache")?;
     }
 
     debug!("Running post-deploy hook");
-    if opt.act {
+    if !opt.dry_run {
         hooks::run_hook(
             &opt.post_deploy,
             &opt.cache_directory,
@@ -171,7 +170,7 @@ pub fn undeploy(opt: Options) -> Result<bool> {
     // === Pre-undeploy ===
 
     debug!("Running pre-undeploy hook");
-    if opt.act {
+    if !opt.dry_run {
         hooks::run_hook(
             &opt.pre_undeploy,
             &opt.cache_directory,
@@ -185,8 +184,8 @@ pub fn undeploy(opt: Options) -> Result<bool> {
     let mut error_occurred = false;
 
     let (mut real_fs, mut dry_run_fs);
-    let fs: &mut dyn Filesystem = if opt.act {
-        real_fs = crate::filesystem::RealFilesystem::new(opt.interactive);
+    let fs: &mut dyn Filesystem = if !opt.dry_run {
+        real_fs = crate::filesystem::RealFilesystem::new(opt.noconfirm);
         &mut real_fs
     } else {
         dry_run_fs = crate::filesystem::DryRunFilesystem::new();
@@ -228,14 +227,14 @@ pub fn undeploy(opt: Options) -> Result<bool> {
         error_occurred = true;
     }
 
-    if opt.act {
+    if !opt.dry_run {
         // Should be empty if everything went well, but if some things were skipped this contains
         // them.
         filesystem::save_file(&opt.cache_file, cache).context("save cache")?;
     }
 
     debug!("Running post-undeploy hook");
-    if opt.act {
+    if !opt.dry_run {
         hooks::run_hook(
             &opt.post_undeploy,
             &opt.cache_directory,
@@ -298,7 +297,7 @@ fn run_deploy<A: ActionRunner>(
         existing_templates.difference(&desired_templates.keys().cloned().collect())
     {
         execute_action(
-            runner.delete_template(source, &opt.cache_directory.join(&source), target),
+            runner.delete_template(source, &opt.cache_directory.join(source), target),
             || resulting_cache.templates.remove(source),
             || format!("delete template {:?} -> {:?}", source, target),
             &mut suggest_force,
@@ -338,7 +337,7 @@ fn run_deploy<A: ActionRunner>(
             .get(&(source.into(), target_path.into()))
             .unwrap();
         execute_action(
-            runner.create_template(source, &opt.cache_directory.join(&source), target),
+            runner.create_template(source, &opt.cache_directory.join(source), target),
             || {
                 resulting_cache
                     .templates
@@ -372,7 +371,7 @@ fn run_deploy<A: ActionRunner>(
             .get(&(source.into(), target_path.into()))
             .unwrap();
         execute_action(
-            runner.update_template(source, &opt.cache_directory.join(&source), target),
+            runner.update_template(source, &opt.cache_directory.join(source), target),
             || (),
             || format!("update template {:?} -> {:?}", source, target_path),
             &mut suggest_force,
